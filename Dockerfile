@@ -1,4 +1,4 @@
-FROM python:3
+FROM python:3.9
 
 ENV PYTHONUNBUFFERED 1
 ENV IN_DOCKER "1"
@@ -18,11 +18,12 @@ COPY ./start_django.sh $BASEDIR/
 RUN chmod +x start_django.sh
 
 ADD requirements.txt $BASEDIR/
+RUN pip install --upgrade pip
 RUN pip install -r requirements.txt
 RUN sed -i -e 's/\r$//' start_django.sh
 WORKDIR $BASEDIR
 ADD ./deans_api $DJANGO_ROOT/
-ADD ./data $DATA_DIR
+ADD ./data $DATA_ROOT
 
 WORKDIR $ENTRY_DIR
 # CMD  ["python3","$DJANGO_ROOT/manage.py", "runserver", "0.0.0.0:8000"]

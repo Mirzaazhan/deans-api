@@ -104,8 +104,9 @@ if('IN_DOCKER' in os.environ and os.environ['IN_DOCKER']=='1'):
     DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'postgres',
-        'USER': 'postgres',
+        'NAME': os.environ.get('POSTGRES_DB', 'deans_db'),
+        'USER': os.environ.get('POSTGRES_USER', 'deans_user'),
+        'PASSWORD': os.environ.get('POSTGRES_PASSWORD', 'deans_password'),
         'HOST': 'db',
         'PORT': 5432,
     },
@@ -173,7 +174,7 @@ USE_I18N = True
 
 USE_L10N = True
 
-USE_TZ = True
+USE_TZ = False
 
 
 # Static files (CSS, JavaScript, Images)
