@@ -41,14 +41,15 @@ Note: Migrated from deprecated url() to re_path()/path() for Django 4.x compatib
 # =============================================================================
 # Using DefaultRouter for automatic URL routing of ViewSets
 # Note: Router prefixes should not start with '^' when using path-style routing
+# Note: Using 'base_name' instead of 'basename' for DRF 3.8.x compatibility
 
 router = routers.DefaultRouter()
-router.register(r'crises', CrisisViewSet, basename='crisis')
-router.register(r'crisisassistance', CrisisAssistanceViewSet, basename='crisisassistance')
-router.register(r'crisistype', CrisisTypeViewSet, basename='crisistype')
-router.register(r'users', UserViewSet, basename='user')
-router.register(r'emergencyagencies', EmergencyAgenciesView, basename='emergencyagency')
-router.register(r'sitesettings', SiteSettingViewSet, basename='sitesetting')
+router.register(r'crises', CrisisViewSet, base_name='crisis')
+router.register(r'crisisassistance', CrisisAssistanceViewSet, base_name='crisisassistance')
+router.register(r'crisistype', CrisisTypeViewSet, base_name='crisistype')
+router.register(r'users', UserViewSet, base_name='user')
+router.register(r'emergencyagencies', EmergencyAgenciesView, base_name='emergencyagency')
+router.register(r'sitesettings', SiteSettingViewSet, base_name='sitesetting')
 
 
 # =============================================================================
