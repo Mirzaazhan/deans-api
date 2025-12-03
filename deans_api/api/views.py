@@ -30,16 +30,32 @@ from rest_framework.permissions import (
 
 '''
     The View Classes here implements the V-view in the MVC architecture.
-    CrisisView, CrisisUpdateView, CrisisPartialUpdateView, 
-    CrisisAssistanceView, CrisisTypeView, 
+    CrisisView, CrisisUpdateView, CrisisPartialUpdateView,
+    CrisisAssistanceView, CrisisTypeView,
     UserView, UserPartialUpdateView,
     SiteSettingView,
     EmergencyView, EmergencyPartialUpdateView
-    
+
     will all be handled by an api url in urls.py
 '''
 
-class CrisisViewSet(viewsets.ModelViewSet):
+class PublicReadAdminWriteMixin:
+    """
+    Mixin that provides common permission logic:
+    - list, retrieve, create actions are allowed for anyone (AllowAny)
+    - All other actions (update, partial_update, destroy) require admin permissions
+    """
+    def get_permissions(self):
+        """
+        Instantiates and returns the list of permissions that this view requires.
+        """
+        if self.action in ['list', 'retrieve', 'create']:
+            permission_classes = [AllowAny]
+        else:
+            permission_classes = [IsAdminUser]
+        return [permission() for permission in permission_classes]
+
+class CrisisViewSet(PublicReadAdminWriteMixin, viewsets.ModelViewSet):
     """
         Return a list of all the existing crisis.
     """
@@ -49,22 +65,6 @@ class CrisisViewSet(viewsets.ModelViewSet):
     #     if self.request.user.is_staff:
     #         return CrisisSerializer
     #     return CrisisBasicSerializer
-
-
-    def get_permissions(self):
-        """
-        Instantiates and returns the list of permissions that this view requires.
-        """
-        if self.action == 'list':
-            permission_classes = [AllowAny]
-        elif self.action == 'retrieve':
-            permission_classes = [AllowAny]
-        elif self.action == 'create':
-            permission_classes = [AllowAny]
-        else:
-            permission_classes = [IsAdminUser]
-
-        return [permission() for permission in permission_classes]
 
 class CrisisUpdateView(generics.GenericAPIView, mixins.UpdateModelMixin):
     '''
@@ -87,41 +87,13 @@ class CrisisPartialUpdateView(generics.GenericAPIView, mixins.UpdateModelMixin):
     def put(self, request, *args, **kwargs):
         return self.partial_update(request, *args, **kwargs)
 
-class CrisisAssistanceViewSet(viewsets.ModelViewSet):
+class CrisisAssistanceViewSet(PublicReadAdminWriteMixin, viewsets.ModelViewSet):
     queryset = CrisisAssistance.objects.all()
     serializer_class = CrisisAssistanceSerializer
 
-    def get_permissions(self):
-        """
-        Instantiates and returns the list of permissions that this view requires.
-        """
-        if self.action == 'list':
-            permission_classes = [AllowAny]
-        elif self.action == 'retrieve':
-            permission_classes = [AllowAny]
-        elif self.action == 'create':
-            permission_classes = [AllowAny]
-        else:
-            permission_classes = [IsAdminUser]
-        return [permission() for permission in permission_classes]
-
-class CrisisTypeViewSet(viewsets.ModelViewSet):
+class CrisisTypeViewSet(PublicReadAdminWriteMixin, viewsets.ModelViewSet):
     queryset = CrisisType.objects.all()
     serializer_class = CrisisTypeSerializer
-
-    def get_permissions(self):
-        """
-        Instantiates and returns the list of permissions that this view requires.
-        """
-        if self.action == 'list':
-            permission_classes = [AllowAny]
-        elif self.action == 'retrieve':
-            permission_classes = [AllowAny]
-        elif self.action == 'create':
-            permission_classes = [AllowAny]
-        else:
-            permission_classes = [IsAdminUser]
-        return [permission() for permission in permission_classes]
 
 class UserViewSet(viewsets.ModelViewSet):
     """
@@ -158,44 +130,16 @@ class UserPartialUpdateView(generics.GenericAPIView, mixins.UpdateModelMixin):
     def put(self, request, *args, **kwargs):
         return self.partial_update(request, *args, **kwargs)
 
-class SiteSettingViewSet(viewsets.ModelViewSet):
+class SiteSettingViewSet(PublicReadAdminWriteMixin, viewsets.ModelViewSet):
 
     serializer_class = SiteSettingsSerializer
     queryset = SiteSettings.objects.all()
 
-    def get_permissions(self):
-        """
-        Instantiates and returns the list of permissions that this view requires.
-        """
-        if self.action == 'list':
-            permission_classes = [AllowAny]
-        elif self.action == 'retrieve':
-            permission_classes = [AllowAny]
-        elif self.action == 'create':
-            permission_classes = [AllowAny]
-        else:
-            permission_classes = [IsAdminUser]
-        return [permission() for permission in permission_classes]
 
-
-class EmergencyAgenciesView(viewsets.ModelViewSet):
+class EmergencyAgenciesView(PublicReadAdminWriteMixin, viewsets.ModelViewSet):
 
     serializer_class = EmergencyAgenciesSerializer
     queryset = EmergencyAgencies.objects.all()
-
-    def get_permissions(self):
-        """
-        Instantiates and returns the list of permissions that this view requires.
-        """
-        if self.action == 'list':
-            permission_classes = [AllowAny]
-        elif self.action == 'retrieve':
-            permission_classes = [AllowAny]
-        elif self.action == 'create':
-            permission_classes = [AllowAny]
-        else:
-            permission_classes = [IsAdminUser]
-        return [permission() for permission in permission_classes]
 
 class EmergencyAgenciesPartialUpdateView(generics.GenericAPIView, mixins.UpdateModelMixin):
 
