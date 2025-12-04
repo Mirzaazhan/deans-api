@@ -182,3 +182,21 @@ USE_TZ = False
 
 STATIC_URL = '/static-django/'
 STATIC_ROOT = '/static-django/'
+
+# Notification Service Configuration
+# These settings control the notification subsystem endpoints and behavior
+NOTIFICATION_SOCIAL_MESSAGES_URL = os.environ.get(
+    'NOTIFICATION_SOCIAL_MESSAGES_URL',
+    'http://notification:8000/socialmessages/'
+)
+NOTIFICATION_DISPATCH_NOTICES_URL = os.environ.get(
+    'NOTIFICATION_DISPATCH_NOTICES_URL',
+    'http://notification:8000/dispatchnotices/'
+)
+NOTIFICATION_REQUEST_TIMEOUT = int(os.environ.get('NOTIFICATION_REQUEST_TIMEOUT', '10'))
+NOTIFICATION_MAX_RETRIES = int(os.environ.get('NOTIFICATION_MAX_RETRIES', '3'))
+NOTIFICATION_RETRY_DELAY = int(os.environ.get('NOTIFICATION_RETRY_DELAY', '1'))
+
+# Crisis Management System URLs
+DEANS_URL = os.environ.get('DEANS_URL', 'https://deans.csming.com/')
+SHELTER_URL = os.environ.get('SHELTER_URL', 'https://deans.csming.com/')

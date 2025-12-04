@@ -4,14 +4,11 @@ from .CrisisType import CrisisType
 from .Operator import Operator
 from .CrisisAssistance import CrisisAssistance
 from django.db.models import signals
-import requests
-import datetime
-import channels.layers
-from asgiref.sync import async_to_sync
-from rest_framework.response import Response # this is bad!
+from datetime import datetime, timedelta
 import json
 import logging
-logger = logging.getLogger("django")
+
+logger = logging.getLogger(__name__)
 
 STATUS_CHOICES = (
     ('PD', 'Pending'),
@@ -61,203 +58,127 @@ class Crisis(models.Model):
     class Meta:
         ordering = ['-crisis_id']
 
-'''
-    social media announcement generator
-'''
-
-def construct_social_media_data(this_crisis):
-    payload = {}
-
-    # shelter location url, immediate Crisis, recent_resolved_crisis, Dispatched Crisis,
-
-    created_time = datetime.datetime.now() - datetime.timedelta(minutes=30)  # crisis created since 30 mins ago
-    recent_resolved_crisis = Crisis.objects.filter(updated_at__gte=created_time, crisis_status="RS")
-    active_crisis = Crisis.objects.exclude(crisis_status="RS")
-
-    payload['postTime'] = created_time.strftime('%Y-%m-%d %H:%M')
-    payload['deansURL'] = "https://deans.csming.com/"
-    payload['shelterURL'] = "https://deans.csming.com/"
-    payload['recent_resolved_crisis'] = []
-    payload['active_crisis'] = []
-    payload['new_crisis'] = []
-    print("payload", payload)
-
-    payload['new_crisis'].append({
-        "crisis_time": this_crisis.crisis_time.strftime("%Y-%m-%d %H:%M:%S"),
-        "resolved_by": this_crisis.updated_at.strftime("%Y-%m-%d %H:%M:%S") if this_crisis.crisis_status == "RS" else "None",
-        "location": this_crisis.crisis_location1,
-        "location2": this_crisis.crisis_location2,
-        "type": ", ".join([j.name for j in this_crisis.crisis_type.all()]),
-        "status": this_crisis.crisis_status,
-        "crisis_description": this_crisis.crisis_description,
-        "crisis_assistance": ", ".join([j.name for j in this_crisis.crisis_assistance.all()]),
-        "assistance_description": this_crisis.crisis_assistance_description
-    }
-    )
-
-    reported_time = str(this_crisis.crisis_time)
-    name = this_crisis.your_name
-    mobile_number = this_crisis.mobile_number
-    location1 = this_crisis.crisis_location1
-    location2 = this_crisis.crisis_location2
-    # create crisis type
-    crisis_type_queryset = this_crisis.crisis_type.all()
-    crisis_type = []
-    for _ in crisis_type_queryset:
-        crisis_type.append(str(_))
-    crisis_type = ", ".join(crisis_type)
-    # create assistance type
-    assistance_type_queryset = this_crisis.crisis_assistance.all()
-    assistance_type = []
-    for _ in assistance_type_queryset:
-        assistance_type.append(str(_))
-    assistance_type = ", ".join(assistance_type)
-    # handle the rest
-    crisis_description = this_crisis.crisis_description
-    assistance_description = this_crisis.crisis_assistance_description
-
-    message = "\nWe have received the following crisis report, need your immediate attention:\n\n"
-    message += "Reported Time: " + reported_time + "\n"
-    message += "Location: " + location1 + "\n"
-    message += "Location2: " + location2 + "\n"
-    message += "Crisis Type: " + crisis_type + "\n"
-    message += "Crisis Description: " + crisis_description + "\n"
-    message += "Requested Assistance: " + assistance_type + "\n"
-    message += "Assistance Description: " + assistance_description + "\n"
-
-    payload['text'] = message
-
-    for i in recent_resolved_crisis:
-        payload['recent_resolved_crisis'].append(
-            {
-                "crisis_time": i.crisis_time.strftime("%Y-%m-%d %H:%M:%S"),
-                "resolved_by": i.updated_at.strftime("%Y-%m-%d %H:%M:%S") if i.crisis_status == "RS" else "None",
-                "location": i.crisis_location1,
-                "location2": i.crisis_location2,
-                "type": ", ".join([j.name for j in i.crisis_type.all()]),
-                "status": i.crisis_status,
-                "crisis_description": i.crisis_description,
-                "crisis_assistance": ", ".join([j.name for j in i.crisis_assistance.all()]),
-                "assistance_description": i.crisis_assistance_description
-            }
-        )
-    for i in active_crisis:
-        payload['active_crisis'].append(
-            {
-                "crisis_time": i.crisis_time.strftime("%Y-%m-%d %H:%M:%S"),
-                "resolved_by": i.updated_at.strftime("%Y-%m-%d %H:%M:%S") if i.crisis_status == "RS" else "None",
-                "location": i.crisis_location1,
-                "location2": i.crisis_location2,
-                "type": ", ".join([j.name for j in i.crisis_type.all()]),
-                "status": i.crisis_status,
-                "crisis_description": i.crisis_description,
-                "crisis_assistance": ", ".join([j.name for j in i.crisis_assistance.all()]),
-                "assistance_description": i.crisis_assistance_description
-            }
-        )
-    return payload
 
 '''
-    notification subsystem - social media api caller trigger + dispatch action trigger
-    when crisis model is saved, this trigger function is called.
-    Social media api will be called to send announcement.
-    dispatch function will only be called when there is a dispatch signal.
+    Signal handler for Crisis model post_save events.
+    
+    This handler is responsible for:
+    1. Sending social media notifications (Facebook, Twitter)
+    2. Sending dispatch notifications (SMS/WhatsApp) when crisis is dispatched
+    3. Broadcasting WebSocket updates to connected clients
+    
+    Reengineered to use service layer for better separation of concerns,
+    error handling, and maintainability.
 '''
 def trigger(sender, instance, created, **kwargs):
-
-    #Social media Trigger
-    print("Doing Social Media Publishing...")
-    url = "http://notification:8000/socialmessages/"
-    this_crisis = Crisis.objects.get(pk=instance.pk)
-    fb_payload = construct_social_media_data(this_crisis)
-    tw_payload = "A Crisis is happening at time: {}!\n".format(fb_payload['postTime'])
-    tw_payload += "For your safety. Shelter Information: " + fb_payload['shelterURL']
-    tw_payload += "\nFor Crisis detail information: " + fb_payload['deansURL']
-
-    print("payload: ", tw_payload)
-    print("payload: ", fb_payload)
-    print("Before sending")
-    # Post to the notification system api, to send facebook and twitter announcement
-    response = requests.post("http://notification:8000/socialmessages/",
-                  json={"message": {"twitterShare":tw_payload, "facebookShare":fb_payload}},
-                  headers={
-                      'content-type': "application/json",
-                  }
-                  )
-    print("Sent request")
-    logger.info(response.status_code)
-    logger.info('Have published to Facebook and Twitter.')
-
-    # Dispatch
-    if this_crisis.crisis_status == "DP":
-        try:
-            if sender.dispatch_trigger:
-                phone_number_to_notify = json.loads(this_crisis.phone_number_to_notify)
-                # start creating message
-                reported_time = str(this_crisis.crisis_time)
-                name = this_crisis.your_name
-                mobile_number = this_crisis.mobile_number
-                location1 = this_crisis.crisis_location1
-                location2 = this_crisis.crisis_location2
-                # create crisis type
-                crisis_type_queryset = this_crisis.crisis_type.all()
-                crisis_type = []
-                for _ in crisis_type_queryset:
-                    crisis_type.append(str(_))
-                crisis_type = ", ".join(crisis_type)
-                # create assistance type
-                assistance_type_queryset = this_crisis.crisis_assistance.all()
-                assistance_type = []
-                for _ in assistance_type_queryset:
-                    assistance_type.append(str(_))
-                assistance_type = ", ".join(assistance_type)
-                # handle the rest
-                crisis_description = this_crisis.crisis_description
-                assistance_description = this_crisis.crisis_assistance_description
-                # construct message content
-                message = "We have received the following crisis report, need your immediate attention:\n\n"
-                message += "Reported Time: " + reported_time + "\n"
-                message += "Reporter Name: " + name + "\n"
-                message += "Mobile Number: " + mobile_number + "\n"
-                message += "Location: " + location1 + "\n"
-                message += "Location2: " + location2 + "\n"
-                message += "Crisis Type: " + crisis_type + "\n"
-                message += "Crisis Description: " + crisis_description + "\n"
-                message += "Requested Assistance: " + assistance_type + "\n"
-                message += "Assistance Description: " + assistance_description + "\n"
-                message += "\nThank you for keeping our people safe!"
-
-                print(message)
-
-                for phone_number in phone_number_to_notify:
-                    prefixed_phone_number = "+65" + str(phone_number)
-                    requests.post("http://notification:8000/dispatchnotices/",
-                                json={"number" : prefixed_phone_number, "message" : message},
-                                headers={
-                                    'content-type': "application/json",
-                                    'cache-control': "no-cache"
-                                }
-                                )
-        except Exception as e:
-            print("It is ok.", e)
-
-    '''
-        Crisis Info, WebSocket cache service
-    '''
-
+    """
+    Signal handler triggered when a Crisis instance is saved.
+    
+    Uses notification and WebSocket services to handle all communication
+    with proper error handling and logging.
+    """
+    from ..services.notification_service import NotificationService
+    from ..services.websocket_service import WebSocketService
+    
+    # Initialize services
+    notification_service = NotificationService()
+    websocket_service = WebSocketService()
+    
+    # Get the crisis instance (ensure we have the latest from DB)
     try:
-        # send to redis
-        queryset = Crisis.objects.all()
-        from ..serializer import CrisisSerializer
-        serializer = CrisisSerializer(queryset, many=True)
-        response = Response(serializer.data) # response is an array of crises
-        channel_layer = channels.layers.get_channel_layer()
-        async_to_sync(channel_layer.group_send)("crises", {
-            "type": "crises_update",
-            "payload": json.dumps(list(response.data))
-        })
+        crisis = Crisis.objects.select_related().prefetch_related(
+            'crisis_type', 'crisis_assistance'
+        ).get(pk=instance.pk)
+    except Crisis.DoesNotExist:
+        logger.error(f"Crisis {instance.pk} not found after save signal")
+        return
+    
+    # 1. Send social media notifications
+    try:
+        logger.info(f"Processing social media notification for crisis {crisis.crisis_id}")
+        
+        # Get related crises for social media payload
+        created_time = datetime.now() - timedelta(minutes=30)
+        recent_resolved_crises = Crisis.objects.filter(
+            updated_at__gte=created_time,
+            crisis_status="RS"
+        ).prefetch_related('crisis_type', 'crisis_assistance')
+        
+        active_crises = Crisis.objects.exclude(
+            crisis_status="RS"
+        ).prefetch_related('crisis_type', 'crisis_assistance')
+        
+        # Send social media notification
+        notification_service.send_social_media_notification(
+            crisis,
+            recent_resolved_crises,
+            active_crises
+        )
+        
     except Exception as e:
-        print("It is not ok. Human lives at risk!", e)
+        logger.error(
+            f"Failed to send social media notification for crisis {crisis.crisis_id}: {str(e)}",
+            exc_info=True
+        )
+        # Continue processing - don't let social media failure block other operations
+    
+    # 2. Send dispatch notifications if crisis is dispatched
+    if crisis.crisis_status == "DP" and crisis.dispatch_trigger:
+        try:
+            logger.info(f"Processing dispatch notification for crisis {crisis.crisis_id}")
+            
+            # Parse phone numbers
+            if crisis.phone_number_to_notify:
+                try:
+                    phone_numbers = json.loads(crisis.phone_number_to_notify)
+                    if isinstance(phone_numbers, list):
+                        successful, failed = notification_service.send_dispatch_notification(
+                            crisis,
+                            phone_numbers
+                        )
+                        logger.info(
+                            f"Dispatch notifications for crisis {crisis.crisis_id}: "
+                            f"{successful} successful, {failed} failed"
+                        )
+                    else:
+                        logger.warning(
+                            f"Invalid phone_numbers format for crisis {crisis.crisis_id}: "
+                            f"expected list, got {type(phone_numbers)}"
+                        )
+                except json.JSONDecodeError as e:
+                    logger.error(
+                        f"Failed to parse phone_numbers JSON for crisis {crisis.crisis_id}: {str(e)}"
+                    )
+            else:
+                logger.warning(
+                    f"No phone numbers to notify for dispatched crisis {crisis.crisis_id}"
+                )
+                
+        except Exception as e:
+            logger.error(
+                f"Failed to send dispatch notification for crisis {crisis.crisis_id}: {str(e)}",
+                exc_info=True
+            )
+            # Continue processing - don't let dispatch failure block WebSocket updates
+    
+    # 3. Broadcast WebSocket update
+    try:
+        logger.info(f"Broadcasting WebSocket update for crisis {crisis.crisis_id}")
+        
+        # Optimize query: only fetch visible crises and use prefetch for related objects
+        all_crises = Crisis.objects.filter(visible=True).prefetch_related(
+            'crisis_type', 'crisis_assistance'
+        )
+        
+        websocket_service.broadcast_crises_update(all_crises)
+        
+    except Exception as e:
+        logger.error(
+            f"Failed to broadcast WebSocket update for crisis {crisis.crisis_id}: {str(e)}",
+            exc_info=True
+        )
+        # This is critical but we don't want to break the save operation
+        # The error is logged for monitoring and debugging
 
 signals.post_save.connect(receiver=trigger, sender=Crisis)
 
