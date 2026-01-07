@@ -20,7 +20,9 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # See https://docs.djangoproject.com/en/2.1/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = '%9mbpu5w!1c$-5xz9v@n03x$0=jzc5wrjlujh1wu*p&sb09iu$'
+# In production, set the DJANGO_SECRET_KEY environment variable to a unique, unpredictable value.
+# Generate one using: python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"
+SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', '%9mbpu5w!1c$-5xz9v@n03x$0=jzc5wrjlujh1wu*p&sb09iu$')
 
 # SECURITY WARNING: don't run with debug turned on in production!
 if('PRODUCTION' in os.environ and os.environ['PRODUCTION']=='1'):
@@ -29,7 +31,10 @@ else:
     DEBUG = True
 
 
-ALLOWED_HOSTS = ['*'] # for Cross-Origin Access
+# SECURITY WARNING: In production, set DJANGO_ALLOWED_HOSTS to a comma-separated list of allowed domains.
+# Example: DJANGO_ALLOWED_HOSTS=deans.csming.com,api.deans.csming.com
+# Using '*' in production is a security risk as it accepts requests from any domain.
+ALLOWED_HOSTS = os.environ.get('DJANGO_ALLOWED_HOSTS', '*').split(',')
 
 
 # Application definition
@@ -71,6 +76,86 @@ CRON_CLASSES = [
 
 ROOT_URLCONF = 'deans_api.urls'
 
+# =============================================================================
+# LOGGING CONFIGURATION
+# Provides structured logging for debugging and monitoring.
+# In production, logs are written to files; in development, logs go to console.
+# =============================================================================
+LOG_LEVEL = os.environ.get('DJANGO_LOG_LEVEL', 'DEBUG' if DEBUG else 'INFO')
+LOG_DIR = os.environ.get('DJANGO_LOG_DIR', os.path.join(BASE_DIR, 'logs'))
+
+# Ensure log directory exists
+if not os.path.exists(LOG_DIR):
+    os.makedirs(LOG_DIR, exist_ok=True)
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            'format': '{levelname} {asctime} {module} {process:d} {thread:d} {message}',
+            'style': '{',
+        },
+        'simple': {
+            'format': '{levelname} {asctime} {module} {message}',
+            'style': '{',
+        },
+    },
+    'filters': {
+        'require_debug_false': {
+            '()': 'django.utils.log.RequireDebugFalse',
+        },
+        'require_debug_true': {
+            '()': 'django.utils.log.RequireDebugTrue',
+        },
+    },
+    'handlers': {
+        'console': {
+            'level': 'DEBUG',
+            'class': 'logging.StreamHandler',
+            'formatter': 'simple',
+        },
+        'file': {
+            'level': 'INFO',
+            'class': 'logging.handlers.RotatingFileHandler',
+            'filename': os.path.join(LOG_DIR, 'django.log'),
+            'maxBytes': 1024 * 1024 * 5,  # 5 MB
+            'backupCount': 5,
+            'formatter': 'verbose',
+        },
+        'error_file': {
+            'level': 'ERROR',
+            'class': 'logging.handlers.RotatingFileHandler',
+            'filename': os.path.join(LOG_DIR, 'error.log'),
+            'maxBytes': 1024 * 1024 * 5,  # 5 MB
+            'backupCount': 5,
+            'formatter': 'verbose',
+        },
+        'mail_admins': {
+            'level': 'ERROR',
+            'filters': ['require_debug_false'],
+            'class': 'django.utils.log.AdminEmailHandler',
+        },
+    },
+    'loggers': {
+        'django': {
+            'handlers': ['console', 'file'],
+            'level': LOG_LEVEL,
+            'propagate': True,
+        },
+        'django.request': {
+            'handlers': ['error_file', 'mail_admins'],
+            'level': 'ERROR',
+            'propagate': False,
+        },
+        'api': {
+            'handlers': ['console', 'file', 'error_file'],
+            'level': LOG_LEVEL,
+            'propagate': False,
+        },
+    },
+}
+
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
@@ -98,19 +183,27 @@ CHANNEL_LAYERS = {
     },
 }
 
-# Database
-# https://docs.djangoproject.com/en/2.1/ref/settings/#databases
+# =============================================================================
+# DATABASE CONFIGURATION
+# All credentials should be set via environment variables in production.
+# Never commit real database credentials to version control.
+# =============================================================================
 if('IN_DOCKER' in os.environ and os.environ['IN_DOCKER']=='1'):
     DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': os.environ.get('POSTGRES_DB', 'deans_db'),
-        'USER': os.environ.get('POSTGRES_USER', 'deans_user'),
-        'PASSWORD': os.environ.get('POSTGRES_PASSWORD', 'deans_password'),
-        'HOST': 'db',
-        'PORT': 5432,
-    },
-}
+        'default': {
+            'ENGINE': 'django.db.backends.postgresql',
+            'NAME': os.environ.get('POSTGRES_DB', 'deans_db'),
+            'USER': os.environ.get('POSTGRES_USER', 'deans_user'),
+            'PASSWORD': os.environ.get('POSTGRES_PASSWORD', 'deans_password'),
+            'HOST': os.environ.get('POSTGRES_HOST', 'db'),
+            'PORT': int(os.environ.get('POSTGRES_PORT', 5432)),
+            # Connection pooling and timeout settings for production stability
+            'CONN_MAX_AGE': int(os.environ.get('POSTGRES_CONN_MAX_AGE', 60)),  # Persistent connections (seconds)
+            'OPTIONS': {
+                'connect_timeout': int(os.environ.get('POSTGRES_CONNECT_TIMEOUT', 10)),
+            },
+        },
+    }
 else:
     DATABASES = {
         'default': {
@@ -137,8 +230,43 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
-# SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+# =============================================================================
+# SECURITY HEADERS CONFIGURATION
+# These settings enhance security in production by enabling HTTPS-only features.
+# Only enabled when PRODUCTION=1 to avoid issues in local development.
+# =============================================================================
+if os.environ.get('PRODUCTION') == '1':
+    # Redirect all HTTP requests to HTTPS
+    SECURE_SSL_REDIRECT = os.environ.get('SECURE_SSL_REDIRECT', 'True').lower() == 'true'
+    
+    # Use secure cookies (HTTPS only)
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    
+    # HTTP Strict Transport Security (HSTS)
+    # Tells browsers to only use HTTPS for this domain
+    SECURE_HSTS_SECONDS = int(os.environ.get('SECURE_HSTS_SECONDS', 31536000))  # 1 year
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
+    
+    # Prevent browsers from MIME-sniffing
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    
+    # Enable XSS filter in browsers
+    SECURE_BROWSER_XSS_FILTER = True
+    
+    # Trust X-Forwarded-Proto header from reverse proxy (nginx)
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+else:
+    # Development settings - disable security features that require HTTPS
+    SECURE_SSL_REDIRECT = False
+    SESSION_COOKIE_SECURE = False
+    CSRF_COOKIE_SECURE = False
 
+# =============================================================================
+# REST FRAMEWORK CONFIGURATION
+# Provides pagination, throttling, and consistent error handling for API.
+# =============================================================================
 REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.AllowAny'
@@ -147,21 +275,55 @@ REST_FRAMEWORK = {
         'rest_framework.authentication.TokenAuthentication',
         'rest_framework.authentication.SessionAuthentication',
     ),
+    # Pagination - limits response size and improves performance
+    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
+    'PAGE_SIZE': int(os.environ.get('API_PAGE_SIZE', 20)),
+    
+    # Throttling - rate limiting to prevent API abuse
+    'DEFAULT_THROTTLE_CLASSES': [
+        'rest_framework.throttling.AnonRateThrottle',
+        'rest_framework.throttling.UserRateThrottle',
+    ],
+    'DEFAULT_THROTTLE_RATES': {
+        'anon': os.environ.get('API_THROTTLE_ANON', '100/hour'),
+        'user': os.environ.get('API_THROTTLE_USER', '1000/hour'),
+    },
+    
+    # Exception handling - consistent error responses
+    'EXCEPTION_HANDLER': 'rest_framework.views.exception_handler',
 }
 
 REST_AUTH_SERIALIZERS = {
     'USER_DETAILS_SERIALIZER': 'api.serializer.UserSerializer',
 }
-if('PRODUCTION' in os.environ and os.environ['PRODUCTION']=='1'):
-    REST_FRAMEWORK['DEFAULT_RENDERER_CLASSES'] =  (
-         'rest_framework.renderers.JSONRenderer',
-     )
 
+# Production-only: Use JSON renderer only (no browsable API)
+if os.environ.get('PRODUCTION') == '1':
+    REST_FRAMEWORK['DEFAULT_RENDERER_CLASSES'] = (
+        'rest_framework.renderers.JSONRenderer',
+    )
+
+# =============================================================================
+# CORS CONFIGURATION
+# Controls which domains can access the API from browsers.
+# In production, set CORS_ALLOWED_ORIGINS to your frontend domain(s).
+# =============================================================================
 CORS_ALLOW_CREDENTIALS = True
-CORS_ORIGIN_WHITELIST = (
-    "localhost:3000",
-    "127.0.0.1:3000"
-)
+
+# Parse CORS origins from environment variable (comma-separated)
+# Example: CORS_ALLOWED_ORIGINS=https://deans.csming.com,https://admin.deans.csming.com
+_cors_origins = os.environ.get('CORS_ALLOWED_ORIGINS', '')
+if _cors_origins:
+    CORS_ALLOWED_ORIGINS = [origin.strip() for origin in _cors_origins.split(',') if origin.strip()]
+else:
+    # Development defaults - allow localhost
+    CORS_ALLOWED_ORIGINS = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ]
+
+# For backwards compatibility with older django-cors-headers versions
+CORS_ORIGIN_WHITELIST = CORS_ALLOWED_ORIGINS
 
 # Internationalization
 # https://docs.djangoproject.com/en/2.1/topics/i18n/
